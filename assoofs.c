@@ -47,7 +47,11 @@ static int assoofs_iterate(struct file *filp, struct dir_context *ctx) {
 /*
  *  Operaciones sobre inodos
  */
+
+struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64_t inode_no);
+
 static struct inode *assoofs_get_inode(struct super_block *sb, int ino);
+
 static int assoofs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
 struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_dentry, unsigned int flags);
 static int assoofs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode);
@@ -60,14 +64,14 @@ static struct inode_operations assoofs_inode_ops = {
 
 static struct inode *assoofs_get_inode(struct super_block *sb, int ino){
     struct inode *inode;
-    struct assofs_inode_info *inode_info;
+    struct assoofs_inode_info *inode_info= NULL;
 
     inode_info = assoofs_get_inode_info(sb,ino);
 
     inode = new_inode(sb);
     inode->i_ino = ino;
-    inode->i_sn = sb;
-    inode->op = &assoofs_file_operations;
+    inode->i_sb = sb;
+    inode->i_op = &assoofs_inode_ops;
 
     if (S_ISDIR(inode_info->mode))
         inode->i_fop = &assoofs_dir_operations;
@@ -87,6 +91,7 @@ static struct inode *assoofs_get_inode(struct super_block *sb, int ino){
 
 
 struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_dentry, unsigned int flags) {
+    int i;
     printk(KERN_INFO "Lookup request\n");
     struct assoofs_inode_info *parent_info = parent_inode->i_private;
     struct super_block *sb = parent_inode->i_sb;
@@ -105,7 +110,7 @@ struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_d
         record++;
     }
 
-    printk(KERN_ERR, "No inode found for the filename");
+    printk(KERN_ERR "No inode found for the filename");
     return NULL;
 }
 
@@ -135,7 +140,7 @@ static const struct super_operations assoofs_sops = {
  *  Inicialización del superbloque
  */
 
-struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64_t inode_no);
+
 
 int assoofs_fill_super(struct super_block *sb, void *data, int silent) {   
     struct inode *root_inode;
@@ -152,7 +157,7 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent) {
 
     // 2.- Comprobar los parámetros del superbloque
     if(assoofs_sb->magic != ASSOOFS_MAGIC || assoofs_sb->block_size != ASSOOFS_DEFAULT_BLOCK_SIZE){
-        printk(KERN_ERR,"Magic number or block size mismatch");
+        printk(KERN_ERR "Magic number or block size mismatch");
         return -1;
     }
 
@@ -186,22 +191,23 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent) {
 struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64_t inode_no){
     struct assoofs_inode_info *inode_info = NULL;
     struct buffer_head *bh;
+    struct assoofs_super_block_info *afs_sb = sb->s_fs_info;
+    struct assoofs_inode_info *buffer = NULL;
+
+    int i;
 
     bh = sb_bread(sb, ASSOOFS_INODESTORE_BLOCK_NUMBER);
     inode_info = (struct assoofs_inode_info *)bh->b_data;
 
 
-    struct assoofs_super_block_info *afs_sb = sb->s_fs_info;
-    struct assoofs_inode_info *buffer = NULL;
-    int i;
+    
     for (i = 0; i < afs_sb->inodes_count; i++) {
         if (inode_info->inode_no == inode_no) {
             buffer = kmalloc(sizeof(struct assoofs_inode_info), GFP_KERNEL);
             memcpy(buffer, inode_info, sizeof(*buffer));
             break;
         }
-    inode_info++;
-
+        inode_info++;
     }
 
     brelse(bh);
