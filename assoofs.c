@@ -80,7 +80,7 @@ static struct inode *assoofs_get_inode(struct super_block *sb, int ino){
     else
         printk(KERN_ERR "Unknown inode type. Neither a directory nor a file.");
 
-    inode->i_atime = inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+    inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
     inode-> i_private = inode_info;
     return inode;
 
@@ -92,13 +92,16 @@ static struct inode *assoofs_get_inode(struct super_block *sb, int ino){
 
 struct dentry *assoofs_lookup(struct inode *parent_inode, struct dentry *child_dentry, unsigned int flags) {
     int i;
-    printk(KERN_INFO "Lookup request\n");
-    struct assoofs_inode_info *parent_info = parent_inode->i_private;
+    struct assoofs_inode_info *parent_info;
     struct super_block *sb = parent_inode->i_sb;
     struct buffer_head *bh;
-    bh = sb_bread(sb, parent_info->data_block_number);
-
     struct assoofs_dir_record_entry *record;
+
+    printk(KERN_INFO "Lookup request\n");
+    parent_info = parent_inode->i_private;
+    bh = sb_bread(sb, parent_info->data_block_number);
+    
+   
     record = (struct assoofs_dir_record_entry *)bh->b_data;
     for (i=0; i < parent_info->dir_children_count; i++) {
         if (!strcmp(record->filename, child_dentry->d_name.name)) {
@@ -163,6 +166,7 @@ int assoofs_fill_super(struct super_block *sb, void *data, int silent) {
 
     // 3.- Escribir la información persistente leída del dispositivo de bloques en el superbloque sb, incluído el campo s_op con las operaciones que soporta.
     sb->s_magic = ASSOOFS_MAGIC;
+    printk(KERN_INFO "Magic number in the disk %ld\n",sb->s_magic);
     sb->s_maxbytes = ASSOOFS_DEFAULT_BLOCK_SIZE;
     sb->s_op = &assoofs_sops;
     sb->s_fs_info = assoofs_sb;
@@ -223,11 +227,12 @@ struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64
  *  Montaje de dispositivos assoofs
  */
 static struct dentry *assoofs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data) {
-    printk(KERN_INFO "assoofs_mount request\n");
     struct dentry *ret = mount_bdev(fs_type, flags, dev_name, data, assoofs_fill_super);
+     printk(KERN_INFO "assoofs_mount request\n");
     // Control de errores a partir del valor de ret. En este caso se puede utilizar la macro IS_ERR: if (IS_ERR(ret)) ...
     if (IS_ERR(ret)){
         printk(KERN_ERR "Error in assoofs_mount ");
+        return NULL;
     }else{
          printk(KERN_INFO "assoofs_mount completed");
          return ret;
@@ -245,18 +250,21 @@ static struct file_system_type assoofs_type = {
 };
 
 static int __init assoofs_init(void) {
-    printk(KERN_INFO "assoofs_init request\n");
     int ret = register_filesystem(&assoofs_type);
+
+    printk(KERN_INFO "assoofs_init request\n");
     // Control de errores a partir del valor de ret
     if(ret !=0){
         printk(KERN_INFO "Error initializing filesystem ");
+        return -1;
     }
     printk(KERN_INFO "assoofs_init completed");
+    return 0;
 }
 
-static void __exit assoofs_exit(void) {
-    printk(KERN_INFO "assoofs_exit request\n");
+static void __exit assoofs_exit(void) { 
     int ret = unregister_filesystem(&assoofs_type);
+    printk(KERN_INFO "assoofs_exit request\n");
     if(ret !=0){
         printk(KERN_INFO "Error in assoofs_exit ");
     }
