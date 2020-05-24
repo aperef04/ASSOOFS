@@ -12,7 +12,7 @@ MODULE_AUTHOR("Alejandro Perez Fernandez");
 
 
 static struct kmem_cache *assoofs_inode_cache;
-
+static DEFINE_MUTEX(assoofs_sb_lock);
 
 
 /*
@@ -356,6 +356,9 @@ static int assoofs_mkdir(struct inode *dir , struct dentry *dentry, umode_t mode
 int assoofs_sb_get_a_freeblock(struct super_block *sb, uint64_t *block){
     struct assoofs_super_block_info *assoofs_sb = sb->s_fs_info;
     int i;
+    if(mutex_lock_interruptible(&assoofs_sb_lock)){
+        return -1;
+    }
     for (i = 2; i < ASSOOFS_MAX_FILESYSTEM_OBJECTS_SUPPORTED; i++)
         if (assoofs_sb->free_blocks & (1 << i))
             break;
@@ -364,20 +367,26 @@ int assoofs_sb_get_a_freeblock(struct super_block *sb, uint64_t *block){
 
     assoofs_sb->free_blocks &= ~(1 << i); //MARCAR EL BLOQUE A 0
     assoofs_save_sb_info(sb);
-
+    mutex_unlock(&assoofs_sb_lock);
     return 0;
 
 }
 
 void assoofs_save_sb_info(struct super_block *vsb){
     struct buffer_head *bh;
-    struct assoofs_super_block *sb = vsb->s_fs_info; // Informacion persistente del superbloque en memoria
+    struct assoofs_super_block *sb; // Informacion persistente del superbloque en memoria
+    
+
+    sb = vsb->s_fs_info;
     bh = sb_bread(vsb, ASSOOFS_SUPERBLOCK_BLOCK_NUMBER);
     bh->b_data = (char *)sb; // Sobreescribo los datos de disco con la informacion en memoria
 
     mark_buffer_dirty(bh);
     sync_dirty_buffer(bh);
+
     brelse(bh);
+    
+    
 
 }
 
@@ -391,6 +400,11 @@ void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *i
     
        
     inode_info = (struct assoofs_inode_info *)bh->b_data;
+
+    if(mutex_lock_interruptible(&assoofs_sb_lock)){
+        return ;
+    }
+
     inode_info += assoofs_sb->inodes_count;
 
     memcpy(inode_info, inode, sizeof(struct assoofs_inode_info));
@@ -399,6 +413,9 @@ void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *i
 
     assoofs_sb->inodes_count++;
     assoofs_save_sb_info(sb);
+
+    mutex_unlock(&assoofs_sb_lock);
+
     brelse(bh);
 
 }
@@ -408,12 +425,17 @@ int assoofs_save_inode_info(struct super_block *sb, struct assoofs_inode_info *i
     struct assoofs_inode_info *inode_pos;
 
     bh = sb_bread(sb, ASSOOFS_INODESTORE_BLOCK_NUMBER);
+    if(mutex_lock_interruptible(&assoofs_sb_lock)){
+        return -1;
+    }
     inode_pos = assoofs_search_inode_info(sb, (struct assoofs_inode_info *)bh->b_data, inode_info);
 
     memcpy(inode_pos, inode_info, sizeof(*inode_pos));
     mark_buffer_dirty(bh);
     sync_dirty_buffer(bh);
     brelse(bh);
+
+    mutex_unlock(&assoofs_sb_lock);
     return 0;
 }
 
