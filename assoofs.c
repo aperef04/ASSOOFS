@@ -13,6 +13,7 @@ MODULE_AUTHOR("Alejandro Perez Fernandez");
 
 static struct kmem_cache *assoofs_inode_cache;
 static DEFINE_MUTEX(assoofs_sb_lock);
+static DEFINE_MUTEX(assoofs_inodes_mgmt_lock);
 
 
 /*
@@ -67,16 +68,21 @@ ssize_t assoofs_write(struct file * filp, const char __user * buf, size_t len, l
 
     bh = sb_bread(filp->f_path.dentry->d_inode->i_sb, inode_info->data_block_number);
     buffer = (char *)bh->b_data;
+    
     buffer += *ppos;
     copy_from_user(buffer, buf, len);
     *ppos += len;
-    
-    inode_info->file_size = *ppos;
-    assoofs_save_inode_info(sb, inode_info);
-
     mark_buffer_dirty(bh);
     sync_dirty_buffer(bh);
     brelse(bh);
+
+    mutex_lock_interruptible(&assoofs_inodes_mgmt_lock);
+
+    inode_info->file_size = *ppos;
+    assoofs_save_inode_info(sb, inode_info);
+
+   
+    mutex_unlock(&assoofs_inodes_mgmt_lock);
     return len;
 
 }
@@ -285,8 +291,13 @@ static int assoofs_create(struct inode *dir, struct dentry *dentry, umode_t mode
     sync_dirty_buffer(bh);
     brelse(bh);
 
+    mutex_lock_interruptible(&assoofs_inodes_mgmt_lock);
+
     parent_inode_info->dir_children_count++;
     assoofs_save_inode_info(sb, parent_inode_info);
+
+    mutex_unlock(&assoofs_inodes_mgmt_lock);
+
     return 0;
 }
 
@@ -345,8 +356,12 @@ static int assoofs_mkdir(struct inode *dir , struct dentry *dentry, umode_t mode
     sync_dirty_buffer(bh);
     brelse(bh);
 
+    mutex_lock_interruptible(&assoofs_inodes_mgmt_lock);
+
     parent_inode_info->dir_children_count++;
     assoofs_save_inode_info(sb, parent_inode_info);
+
+    mutex_unlock(&assoofs_inodes_mgmt_lock);
 
     return 0;
 }
@@ -395,7 +410,12 @@ void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *i
     struct assoofs_inode_info *inode_info;
     struct assoofs_super_block_info *assoofs_sb;
 
+
     assoofs_sb = (struct assoofs_super_block_info *)sb->s_fs_info;
+
+    if(mutex_lock_interruptible(&assoofs_inodes_mgmt_lock)){
+        return ;
+    }
     bh = sb_bread(sb, ASSOOFS_INODESTORE_BLOCK_NUMBER);
     
        
@@ -415,6 +435,7 @@ void assoofs_add_inode_info(struct super_block *sb, struct assoofs_inode_info *i
     assoofs_save_sb_info(sb);
 
     mutex_unlock(&assoofs_sb_lock);
+    mutex_unlock(&assoofs_inodes_mgmt_lock);
 
     brelse(bh);
 
@@ -534,7 +555,7 @@ struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64
     bh = sb_bread(sb, ASSOOFS_INODESTORE_BLOCK_NUMBER);
     inode_info = (struct assoofs_inode_info *)bh->b_data;
 
-
+    mutex_lock_interruptible(&assoofs_inodes_mgmt_lock);
     
     for (i = 0; i < afs_sb->inodes_count; i++) {
         if (inode_info->inode_no == inode_no) {
@@ -548,6 +569,7 @@ struct assoofs_inode_info *assoofs_get_inode_info(struct super_block *sb, uint64
         printk(KERN_ERR "assoofs_get_inode_info: Inode not found");
     }
     brelse(bh);
+    mutex_unlock(&assoofs_inodes_mgmt_lock);
     printk(KERN_INFO "assoofs_get_inode_info finish");
     return buffer;
 }
